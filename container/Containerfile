@@ -34,7 +34,7 @@ LABEL license="MIT"
 LABEL vendor="Anderson Toshiyuki Sasaki"
 
 # Install necessary runtime dependencies
-RUN microdnf makecache && install -y libstdc++ && dnf clean all && rm -rf /var/cache/dnf
+RUN microdnf makecache && microdnf install -y libstdc++ && microdnf clean all && rm -rf /var/cache/dnf
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder /usr/src/takeout-exif-fix/target/release/takeout-exif-fix /usr/local/bin/takeout-exif-fix
