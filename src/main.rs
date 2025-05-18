@@ -191,14 +191,16 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
 
     // Check if the file already exists and add a counter if necessary
     let mut counter = 1;
-    if output.path.exists() {
-        let out_dir = output_directory.join("duplicates");
+
+    if output_path.exists() {
+        let out_dir = Path::new(output_directory).join("duplicates");
+
         fs::create_dir_all(&out_dir)?;
         output_path = out_dir.join(photo_path.file_name().unwrap_or_else(|| {
             // Use a default name for files without a name
             std::ffi::OsStr::new("unnamed_file")
         }));
-        
+
         // Append a counter to the filename if it already exists
         while output_path.exists() {
             let file_stem = photo_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
