@@ -156,7 +156,31 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
     let month_dir = year_dir.join(month_name);
     fs::create_dir_all(&month_dir)?;
 
-    let output_path = month_dir.join(photo_path.file_name().unwrap());
+    let target_dir = if let Some(extension) = photo_path.extension().and_then(|ext| ext.to_str()) {
+        month_dir.join(extension)
+    } else {
+        month_dir.join("no_ext")
+    };
+    fs::create_dir_all(&target_dir)?;
+
+    let mut output_path = target_dir.join(photo_path.file_name().unwrap_or_else(|| {
+        // Use a default name for files without a name
+        std::ffi::OsStr::new("unnamed_file")
+    }));
+
+    // Check if the file already exists and add a counter if necessary
+    let mut counter = 1;
+    while output_path.exists() {
+        let file_stem = photo_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
+        let extension = photo_path.extension().unwrap_or_else(|| std::ffi::OsStr::new(""));
+        let new_file_name = if extension.is_empty() {
+            format!("{}_{}", file_stem.to_string_lossy(), counter)
+        } else {
+            format!("{}_{}.{}", file_stem.to_string_lossy(), counter, extension.to_string_lossy())
+        };
+        output_path = target_dir.join(new_file_name);
+        counter += 1;
+    }
     fs::copy(photo_path, &output_path)?;
 
     let unix_timestamp = parsed_time.timestamp();
