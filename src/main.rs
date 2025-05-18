@@ -10,6 +10,7 @@ use filetime::{FileTime, set_file_times};
 use chrono::{NaiveDateTime, Datelike, DateTime, TimeZone, Utc};
 use pretty_env_logger;
 use log::*;
+use rayon::prelude::*;
 
 /// A tool to organize photos based on their metadata
 #[derive(Parser, Debug)]
@@ -45,16 +46,20 @@ fn main() {
     log::info!("Starting the photo organizer...");
 
     let metadata_map = parse_metadata_files(input_directory);
-    process_directory(input_directory, output_directory, &metadata_map);
+    process_directory_parallel(input_directory, output_directory, &metadata_map);
 }
 
 /// Parse all metadata files and store relevant information in a HashMap
 fn parse_metadata_files(directory: &str) -> HashMap<String, chrono::DateTime<Utc>> {
-    let mut metadata_map = HashMap::new();
+    let metadata_map = std::sync::Mutex::new(HashMap::new());
 
-    for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+    WalkDir::new(directory)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .par_bridge() // Parallelize the iterator
+        .for_each(|entry| {
+            let path = entry.path();
             if let Ok(mut file) = File::open(path) {
                 let mut contents = String::new();
                 if file.read_to_string(&mut contents).is_ok() {
@@ -63,7 +68,10 @@ fn parse_metadata_files(directory: &str) -> HashMap<String, chrono::DateTime<Utc
                             if let Some(photo_taken_timestamp) = metadata["photoTakenTime"]["timestamp"].as_str() {
                                 if let Ok(timestamp) = photo_taken_timestamp.parse::<i64>() {
                                     if let Some(parsed_time) = DateTime::from_timestamp(timestamp, 0) {
+                                        let mut metadata_map = metadata_map.lock().unwrap();
                                         metadata_map.insert(photo_filename.to_string(), parsed_time);
+                                    } else {
+                                        error!("Failed to parse timestamp for file: {}", photo_filename);
                                     }
                                 }
                             }
@@ -71,17 +79,20 @@ fn parse_metadata_files(directory: &str) -> HashMap<String, chrono::DateTime<Utc
                     }
                 }
             }
-        }
-    }
+        });
 
-    metadata_map
+    std::sync::Mutex::into_inner(metadata_map).unwrap()
 }
 
 /// Process the directory and organize photos based on metadata or EXIF data
-fn process_directory(directory: &str, output_directory: &str, metadata_map: &HashMap<String, chrono::DateTime<Utc>>) {
-    for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_file() {
+fn process_directory_parallel(directory: &str, output_directory: &str, metadata_map: &HashMap<String, chrono::DateTime<Utc>>) {
+    WalkDir::new(directory)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .par_bridge() // Parallelize the iterator
+        .for_each(|entry| {
+            let path = entry.path();
             if let Some(filename) = path.file_name().and_then(|name| name.to_str()) {
                 if let Some(&parsed_time) = metadata_map.get(filename) {
                     info!("Processing photo file {:?} using metadata timestamp: {}", path, parsed_time);
@@ -97,8 +108,7 @@ fn process_directory(directory: &str, output_directory: &str, metadata_map: &Has
                     }
                 }
             }
-        }
-    }
+        });
 }
 
 /// Process a photo file using EXIF metadata
