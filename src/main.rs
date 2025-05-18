@@ -191,16 +191,26 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
 
     // Check if the file already exists and add a counter if necessary
     let mut counter = 1;
-    while output_path.exists() {
-        let file_stem = photo_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
-        let extension = photo_path.extension().unwrap_or_else(|| std::ffi::OsStr::new(""));
-        let new_file_name = if extension.is_empty() {
-            format!("{}_{}", file_stem.to_string_lossy(), counter)
-        } else {
-            format!("{}_{}.{}", file_stem.to_string_lossy(), counter, extension.to_string_lossy())
-        };
-        output_path = target_dir.join(new_file_name);
-        counter += 1;
+    if output.path.exists() {
+        let out_dir = output_directory.join("duplicates");
+        fs::create_dir_all(&out_dir)?;
+        output_path = out_dir.join(photo_path.file_name().unwrap_or_else(|| {
+            // Use a default name for files without a name
+            std::ffi::OsStr::new("unnamed_file")
+        }));
+        
+        // Append a counter to the filename if it already exists
+        while output_path.exists() {
+            let file_stem = photo_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
+            let extension = photo_path.extension().unwrap_or_else(|| std::ffi::OsStr::new(""));
+            let new_file_name = if extension.is_empty() {
+                format!("{}_{}", file_stem.to_string_lossy(), counter)
+            } else {
+                format!("{}_{}.{}", file_stem.to_string_lossy(), counter, extension.to_string_lossy())
+            };
+            output_path = target_dir.join(new_file_name);
+            counter += 1;
+        }
     }
     fs::copy(photo_path, &output_path)?;
 
