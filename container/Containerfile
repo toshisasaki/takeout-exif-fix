@@ -1,0 +1,43 @@
+# Step 1: Build the application
+FROM fedora:latest AS builder
+
+# Install Rust and necessary dependencies
+RUN dnf install -y rust cargo
+
+# Create a new directory for the application
+WORKDIR /usr/src/takeout-exif-fix
+
+# Copy the source code
+COPY src ./src
+COPY Cargo.toml ./
+COPY Cargo.lock ./
+
+# Build the application
+RUN cargo build --release
+
+# Step 2: Create the final image
+FROM quay.io/fedora/fedora-minimal
+ARG VERSION=latest
+LABEL org.opencontainers.image.authors="Anderson Toshiyuki Sasaki <11450334+toshisasaki@users.noreply.github.com>"
+LABEL org.opencontainers.image.version="$VERSION"
+LABEL org.opencontainers.image.title="Photo organizer"
+LABEL org.opencontainers.image.description="Organize photos by month and fix EXIF data"
+LABEL org.opencontainers.image.url="https://github.com/toshisasaki/takeout-exif-fix"
+LABEL org.opencontainers.image.source="https://github.com/toshisasaki/takeout-exif-fix"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.vendor="Anderson Toshiyuki Sasaki"
+
+# these labels are set in the fedora base image and should be overwritten
+LABEL name="Photo organizer"
+LABEL version="$VERSION"
+LABEL license="MIT"
+LABEL vendor="Anderson Toshiyuki Sasaki"
+
+# Install necessary runtime dependencies
+RUN microdnf makecache && install -y libstdc++ && dnf clean all && rm -rf /var/cache/dnf
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /usr/src/takeout-exif-fix/target/release/takeout-exif-fix /usr/local/bin/takeout-exif-fix
+
+# Set the command to run the application
+ENTRYPOINT ["/usr/local/bin/takeout-exif-fix"]
