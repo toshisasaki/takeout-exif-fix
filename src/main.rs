@@ -127,15 +127,15 @@ fn process_photo_file(photo_path: &Path, output_directory: &str) -> Result<(), B
                 let parsed_time_utc = Utc.from_local_datetime(&parsed_time).unwrap();
                 organize_and_update_file(photo_path, parsed_time_utc, output_directory)?;
             } else {
-                error!("Failed to parse EXIF DateTimeOriginal for file: {:?}", photo_path);
+                warn!("Failed to parse EXIF DateTimeOriginal for file: {:?}", photo_path);
                 process_photo_file_with_creation_time(photo_path, output_directory)?;
             }
         } else {
-            error!("No EXIF DateTimeOriginal field found in {:?}", photo_path);
+            warn!("No EXIF DateTimeOriginal field found in {:?}", photo_path);
             process_photo_file_with_creation_time(photo_path, output_directory)?;
         }
     } else {
-        error!("No EXIF metadata found in {:?}", photo_path);
+        warn!("No EXIF metadata found in {:?}", photo_path);
         process_photo_file_with_creation_time(photo_path, output_directory)?;
     }
 
