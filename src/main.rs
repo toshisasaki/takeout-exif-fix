@@ -91,6 +91,8 @@ fn process_directory_parallel(directory: &str, output_directory: &str, metadata_
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_file())
         .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("json"))
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("zip"))
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("html"))
         .par_bridge() // Parallelize the iterator
         .for_each(|entry| {
             let path = entry.path();
