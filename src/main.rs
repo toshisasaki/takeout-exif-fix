@@ -90,6 +90,7 @@ fn process_directory_parallel(directory: &str, output_directory: &str, metadata_
         .into_iter()
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_file())
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("json"))
         .par_bridge() // Parallelize the iterator
         .for_each(|entry| {
             let path = entry.path();
@@ -118,17 +119,37 @@ fn process_photo_file(photo_path: &Path, output_directory: &str) -> Result<(), B
 
     if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
         if let Some(field) = exif.get_field(Tag::DateTimeOriginal, In::PRIMARY) {
+            info!("Found EXIF DateTimeOriginal field in {:?}", photo_path);
             let date_time_original = field.display_value().to_string();
-            if let Ok(parsed_time) = NaiveDateTime::parse_from_str(&date_time_original, "%Y:%m:%d %H:%M:%S") {
+            debug!("EXIF DateTimeOriginal: {}", date_time_original);
+            if let Ok(parsed_time) = NaiveDateTime::parse_from_str(&date_time_original, "%Y-%m-%d %H:%M:%S") {
+                // Convert to UTC
                 let parsed_time_utc = Utc.from_local_datetime(&parsed_time).unwrap();
                 organize_and_update_file(photo_path, parsed_time_utc, output_directory)?;
+            } else {
+                error!("Failed to parse EXIF DateTimeOriginal for file: {:?}", photo_path);
+                process_photo_file_with_creation_time(photo_path, output_directory)?;
             }
+        } else {
+            error!("No EXIF DateTimeOriginal field found in {:?}", photo_path);
+            process_photo_file_with_creation_time(photo_path, output_directory)?;
         }
     } else {
         error!("No EXIF metadata found in {:?}", photo_path);
+        process_photo_file_with_creation_time(photo_path, output_directory)?;
     }
 
     Ok(())
+}
+
+/// Fallback: Process a photo file using its creation timestamp if no metadata or EXIF data is available
+fn process_photo_file_with_creation_time(photo_path: &Path, output_directory: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs::metadata;
+    let meta = metadata(photo_path)?;
+    let created = meta.created().or_else(|_| meta.modified())?;
+    let datetime: chrono::DateTime<Utc> = created.into();
+    info!("Using file creation/modification time for {:?}", photo_path);
+    organize_and_update_file(photo_path, datetime, output_directory)
 }
 
 /// Organize and update the file based on the parsed time
