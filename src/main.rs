@@ -180,7 +180,7 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
     fs::create_dir_all(&month_dir)?;
 
     let target_dir = if let Some(extension) = photo_path.extension().and_then(|ext| ext.to_str()) {
-        month_dir.join(extension)
+        month_dir.join(extension.to_lowercase())
     } else {
         month_dir.join("no_ext")
     };
