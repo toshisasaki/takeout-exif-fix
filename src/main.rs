@@ -11,6 +11,12 @@ use chrono::{NaiveDateTime, Datelike, DateTime, TimeZone, Utc};
 use pretty_env_logger;
 use log::*;
 use rayon::prelude::*;
+use sha2::{Sha256, Digest};
+use std::sync::{Mutex, Arc};
+use std::collections::HashSet;
+
+// A mutex to manage reserved file paths during parallel processing
+pub static MUTEX: Arc<Mutex<HashSet>> = Arc::new(Mutex::new(HashSet::new()));
 
 /// A tool to organize photos based on their metadata
 #[derive(Parser, Debug)]
@@ -154,6 +160,50 @@ fn process_photo_file_with_creation_time(photo_path: &Path, output_directory: &s
     organize_and_update_file(photo_path, datetime, output_directory)
 }
 
+/// A helper function to find a unique filename
+/// This function appends a counter to the original filename. The counter is incremented until a unique filename is found.
+fn find_unique_filename(base_dir: &Path, original_path: &Path, reserved_paths: HashSet) -> std::path::PathBuf {
+    let mut counter = 1;
+    loop {
+        let file_stem = original_path.file_stem()
+            .unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
+        let extension = original_path.extension()
+            .unwrap_or_else(|| std::ffi::OsStr::new(""));
+        
+        let new_file_name = if extension.is_empty() {
+            format!("{}_{}", file_stem.to_string_lossy(), counter)
+        } else {
+            format!("{}_{}.{}", file_stem.to_string_lossy(), counter, extension.to_string_lossy())
+        };
+
+        // If the new file name is not in reserved paths and does not exist, return it
+        if !reserved_paths.contains(&base_dir.join(&new_file_name)) && !base_dir.join(&new_file_name).exists() {
+            return base_dir.join(new_file_name);
+        }
+        counter += 1;
+    }
+}
+
+/// A function to get a unique filename to output the photo
+/// This function ensures that no two threads write to the same file simultaneously
+/// by using a mutex to lock the reserved paths during the check and insert operation.
+/// First, it locks the reserved paths set, checks if the desired output path is already reserved or exists,
+/// and if not, it reserves the path by inserting it into the set.
+/// If the path is already reserved or exists, it tries again until a unique path is found.
+/// Finally, it releases the lock before performing the file copy operation.
+fn get_output_path(photo_path: &Path, target_dir: &Path) -> std::path::PathBuf {
+    let mut reserved_paths = MUTEX.lock().unwrap();
+    let mut output_path = target_dir.join(photo_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file")));
+    loop {
+        if !reserved_paths.contains(&output_path) && !output_path.exists() {
+            reserved_paths.insert(output_path.clone());
+            break;
+        }
+        output_path = find_unique_filename(target_dir, photo_path);
+    }
+    output_path
+}
+
 /// Organize and update the file based on the parsed time
 fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc>, output_directory: &str) -> Result<(), Box<dyn std::error::Error>> {
     let year = parsed_time.year();
@@ -186,36 +236,8 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
     };
     fs::create_dir_all(&target_dir)?;
 
-    let mut output_path = target_dir.join(photo_path.file_name().unwrap_or_else(|| {
-        // Use a default name for files without a name
-        std::ffi::OsStr::new("unnamed_file")
-    }));
+    let output_path = get_output_path(photo_path, &target_dir);
 
-    // Check if the file already exists and add a counter if necessary
-    let mut counter = 1;
-
-    if output_path.exists() {
-        let out_dir = Path::new(output_directory).join("duplicates");
-
-        fs::create_dir_all(&out_dir)?;
-        output_path = out_dir.join(photo_path.file_name().unwrap_or_else(|| {
-            // Use a default name for files without a name
-            std::ffi::OsStr::new("unnamed_file")
-        }));
-
-        // Append a counter to the filename if it already exists
-        while output_path.exists() {
-            let file_stem = photo_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file"));
-            let extension = photo_path.extension().unwrap_or_else(|| std::ffi::OsStr::new(""));
-            let new_file_name = if extension.is_empty() {
-                format!("{}_{}", file_stem.to_string_lossy(), counter)
-            } else {
-                format!("{}_{}.{}", file_stem.to_string_lossy(), counter, extension.to_string_lossy())
-            };
-            output_path = target_dir.join(new_file_name);
-            counter += 1;
-        }
-    }
     fs::copy(photo_path, &output_path)?;
 
     let unix_timestamp = parsed_time.timestamp();
@@ -224,4 +246,3 @@ fn organize_and_update_file(photo_path: &Path, parsed_time: chrono::DateTime<Utc
 
     Ok(())
 }
-
