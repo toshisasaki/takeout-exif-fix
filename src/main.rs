@@ -11,12 +11,12 @@ use chrono::{NaiveDateTime, Datelike, DateTime, TimeZone, Utc};
 use pretty_env_logger;
 use log::*;
 use rayon::prelude::*;
-use sha2::{Sha256, Digest};
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, MutexGuard, Arc, OnceLock};
 use std::collections::HashSet;
 
+
 // A mutex to manage reserved file paths during parallel processing
-pub static MUTEX: Arc<Mutex<HashSet>> = Arc::new(Mutex::new(HashSet::new()));
+pub static MUTEX: OnceLock<Arc<Mutex<HashSet<String>>>> = OnceLock::new();
 
 /// A tool to organize photos based on their metadata
 #[derive(Parser, Debug)]
@@ -162,7 +162,7 @@ fn process_photo_file_with_creation_time(photo_path: &Path, output_directory: &s
 
 /// A helper function to find a unique filename
 /// This function appends a counter to the original filename. The counter is incremented until a unique filename is found.
-fn find_unique_filename(base_dir: &Path, original_path: &Path, reserved_paths: HashSet) -> std::path::PathBuf {
+fn find_unique_filename(base_dir: &Path, original_path: &Path, reserved_paths: &MutexGuard<HashSet<String>>) -> std::path::PathBuf {
     let mut counter = 1;
     loop {
         let file_stem = original_path.file_stem()
@@ -177,7 +177,7 @@ fn find_unique_filename(base_dir: &Path, original_path: &Path, reserved_paths: H
         };
 
         // If the new file name is not in reserved paths and does not exist, return it
-        if !reserved_paths.contains(&base_dir.join(&new_file_name)) && !base_dir.join(&new_file_name).exists() {
+        if !reserved_paths.contains(base_dir.join(&new_file_name).to_string_lossy().as_ref()) && !base_dir.join(&new_file_name).exists() {
             return base_dir.join(new_file_name);
         }
         counter += 1;
@@ -192,14 +192,17 @@ fn find_unique_filename(base_dir: &Path, original_path: &Path, reserved_paths: H
 /// If the path is already reserved or exists, it tries again until a unique path is found.
 /// Finally, it releases the lock before performing the file copy operation.
 fn get_output_path(photo_path: &Path, target_dir: &Path) -> std::path::PathBuf {
-    let mut reserved_paths = MUTEX.lock().unwrap();
+     let mut reserved_paths = MUTEX
+            .get_or_init(|| Arc::new(Mutex::new(HashSet::new())))
+            .lock()
+            .unwrap();
     let mut output_path = target_dir.join(photo_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("unnamed_file")));
     loop {
-        if !reserved_paths.contains(&output_path) && !output_path.exists() {
-            reserved_paths.insert(output_path.clone());
+        if !reserved_paths.contains(output_path.to_string_lossy().as_ref()) && !output_path.exists() {
+            reserved_paths.insert(output_path.to_string_lossy().to_string());
             break;
         }
-        output_path = find_unique_filename(target_dir, photo_path);
+        output_path = find_unique_filename(target_dir, photo_path, &reserved_paths);
     }
     output_path
 }
